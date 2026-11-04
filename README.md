@@ -1,7 +1,6 @@
 # Projeto de Modelagem de Banco de Dados - Clínica Médica
 
 **Integrantes do Grupo:**
-- Jhonata De Oliveira Claudio 2061 GEC
 - Pablo Teixeira Villela dos Santos 598 GES
 - Caio Rodrigues Couto 447
 
