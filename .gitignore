@@ -1,0 +1,23 @@
+# MySQL Workbench: backups e arquivos temporários do modelo
+*.mwb.bak
+*.mwb.beforeupdate
+*.mwbd/
+
+# Credenciais e configurações locais (não publicar)
+*.cnf
+.env
+.env.*
+
+# Dumps, backups e logs gerados localmente
+*.bak
+*.log
+dump*.sql
+
+# Editores e IDEs
+.vscode/
+.idea/
+
+# Sistema operacional
+Thumbs.db
+desktop.ini
+.DS_Store
