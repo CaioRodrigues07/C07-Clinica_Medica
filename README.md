@@ -70,3 +70,50 @@ O script foi executado duas vezes seguidas num MySQL 8.0, sem erro. Em seguida, 
 - apagar um paciente que tem consulta, ou uma especialidade que tem médicos.
 
 > **Observação:** no Windows, o MySQL guarda os nomes das tabelas em minúsculas, mas no Linux eles diferenciam maiúsculas de minúsculas. Por isso, os scripts devem usar os nomes exatamente como estão no DDL (`Paciente`, `Consulta`, `idconsulta`...).
+
+### `05_procedure_trigger.sql`: procedure de agendamento e triggers de horário
+
+Cria as regras de negócio do agendamento de consultas. O arquivo pode ser rodado de novo sem erro, porque começa apagando os objetos se eles já existirem (`DROP ... IF EXISTS`).
+
+#### Procedure `agendar_consulta(p_paciente, p_medico, p_data_hora)`
+
+**Por que foi criada:** para que o agendamento seja feito sempre do mesmo jeito, com validações e mensagens de erro claras, em vez de um `INSERT` direto na tabela `Consulta`. Quem usa o sistema (por exemplo, a recepção) só precisa chamar `CALL agendar_consulta(1, 2, '2026-12-01 10:00:00');`.
+
+O que ela faz, em ordem:
+
+| Etapa | Verificação | Mensagem se falhar |
+|---|---|---|
+| 1 | Os três parâmetros foram informados | `Paciente, médico e data/hora são obrigatórios.` |
+| 2 | O paciente existe | `Paciente não encontrado.` |
+| 3 | O médico existe | `Médico não encontrado.` |
+| 4 | A data/hora é futura (não dá para agendar no passado) | `A consulta deve ser agendada para uma data futura.` |
+| 5 | Insere a consulta e retorna o `idconsulta` gerado | — |
+
+- `SIGNAL SQLSTATE '45000'` interrompe a procedure e devolve a mensagem para quem chamou. O código `45000` é o reservado para erros definidos pelo usuário.
+- As verificações 2 e 3 repetem o que as FKs já garantem, mas trocam o erro técnico de FK por uma mensagem que a recepção entende.
+- O conflito de horário do médico **não** é verificado aqui, e sim no trigger abaixo. Assim a regra vale também para inserções feitas fora da procedure.
+- `DELIMITER $$` troca o fim de comando de `;` para `$$` enquanto os objetos são criados, porque o corpo deles tem vários `;` internos.
+
+#### Triggers `trg_consulta_conflito_insert` e `trg_consulta_conflito_update`
+
+**Por que foram criados:** um médico não pode atender dois pacientes ao mesmo tempo. Os triggers garantem essa regra no próprio banco, qualquer que seja a forma de gravar a consulta: pela procedure, por um `INSERT` direto ou por uma remarcação com `UPDATE`.
+
+| Trigger | Quando dispara | O que faz |
+|---|---|---|
+| `trg_consulta_conflito_insert` | `BEFORE INSERT` em `Consulta` | Se o mesmo médico já tem uma consulta exatamente nessa data/hora, cancela a inserção com `O médico já tem uma consulta neste horário.` |
+| `trg_consulta_conflito_update` | `BEFORE UPDATE` em `Consulta` | Mesma verificação ao remarcar, ignorando a própria consulta (`idconsulta <> NEW.idconsulta`), para que alterar outro campo da consulta não seja visto como conflito. |
+
+- `BEFORE` faz a verificação antes de gravar, então a linha inválida nunca chega à tabela.
+- `NEW` representa a linha que está sendo inserida ou o novo valor da linha que está sendo alterada.
+- O trigger de `UPDATE` é um **extra**: sem ele, o enunciado já estaria atendido, mas uma remarcação poderia criar o conflito que o trigger de `INSERT` impede.
+- Consideramos conflito apenas o **mesmo horário exato**, porque o modelo não guarda a duração da consulta.
+- Os triggers só valem para as consultas gravadas depois deles. Como o `02_inserts.sql` roda antes, os dados iniciais foram montados sem conflitos de horário.
+
+#### Regras verificadas
+
+O script foi executado duas vezes seguidas num MySQL 8.0, sem erro, e testado com dados de exemplo:
+
+- **Funcionaram:** agendar pela procedure; o mesmo horário com **outro** médico; remarcar uma consulta para um horário livre; alterar o paciente de uma consulta sem mudar o horário.
+- **Foram recusados, com a mensagem esperada:** paciente inexistente; médico inexistente; data no passado; parâmetro nulo; agendar um médico num horário já ocupado (pela procedure e por `INSERT` direto); remarcar para um horário em que o médico já atende.
+
+> **Observação:** com o log binário ativo (padrão do MySQL 8), só um usuário com privilégio `SUPER` (como o `root`) pode criar triggers e functions. Com outro usuário, é preciso antes rodar `SET GLOBAL log_bin_trust_function_creators = 1;` como root.
