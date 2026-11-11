@@ -14,6 +14,93 @@ O projeto consiste na modelagem de um banco de dados para gerenciar as rotinas d
 
 ---
 
+## 2ª entrega: implementação em MySQL
+
+Esta entrega continua o trabalho da 1ª: o modelo `clinica_medica.mwb` foi transformado em scripts SQL para **MySQL 8.0.13 ou mais recente**, com dados de exemplo, consultas e regras de negócio. Os nomes de tabelas e colunas seguem o modelo, com algumas correções documentadas na seção do `01_ddl.sql`.
+
+### Arquivos
+
+| Ordem | Arquivo | Conteúdo | Autor |
+|---|---|---|---|
+| 1 | `01_ddl.sql` | Criação do banco e das 5 tabelas | Caio |
+| 2 | `02_inserts.sql` | Dados de exemplo (5 ou mais registros por tabela) | Pablo |
+| 3 | `03_dml.sql` | Comandos `UPDATE` e `DELETE` | Pablo |
+| 4 | `04_joins.sql` | Consultas com `JOIN` (1:1, 1:N e N:M) | Pablo |
+| 5 | `05_procedure_trigger.sql` | Procedure `agendar_consulta` e triggers de conflito de horário | Caio |
+| 6 | `06_view_function.sql` | View `vw_agenda_consultas` e function `calcular_idade` | Pablo |
+| 7 | `07_usuarios_roles.sql` | Role `recepcao` e dois usuários ligados a ela | Caio |
+| — | `script_completo.sql` | Os 7 arquivos acima juntos, na mesma ordem | Dupla |
+
+A ordem importa: cada arquivo usa o que os anteriores criaram. Por exemplo, os `INSERT`s precisam das tabelas, e o `07` concede permissões sobre a view, a procedure e a function, que precisam existir antes.
+
+### Onde está cada requisito
+
+| Requisito | Onde |
+|---|---|
+| Script do modelo (banco e tabelas) | `01_ddl.sql` |
+| Mínimo de 5 registros por tabela | `02_inserts.sql` |
+| Comandos DML com explicação | `03_dml.sql` |
+| Dois usuários ligados por uma ROLE | `07_usuarios_roles.sql` |
+| JOINs 1:1, 1:N e N:M | `04_joins.sql` |
+| Procedure | `agendar_consulta`, em `05_procedure_trigger.sql` |
+| Trigger | `trg_consulta_conflito_insert` (e o extra `trg_consulta_conflito_update`), em `05_procedure_trigger.sql` |
+| View | `vw_agenda_consultas`, em `06_view_function.sql` |
+| Function | `calcular_idade`, em `06_view_function.sql` |
+| Documentação | Este README, na seção *Documentação dos scripts* |
+
+## Como rodar
+
+**Requisitos:** MySQL Server 8.0.13 ou mais recente, executando como `root`. Com o log binário ativo, que é o padrão do MySQL 8, só um usuário com privilégio `SUPER`, como o root, pode criar triggers e functions.
+
+> **Atenção:** os scripts apagam e recriam o banco `clinica_medica` e os usuários `ana_recepcao` e `bruno_recepcao`, se eles já existirem.
+
+### Opção 1: script completo (recomendada)
+
+Roda tudo de uma vez.
+
+- **MySQL Workbench:** conecte como root, abra o arquivo em *File → Open SQL Script…*, escolha `script_completo.sql` e execute tudo com o botão do raio (*Execute*).
+- **Linha de comando**, de dentro da pasta do repositório:
+  ```bash
+  mysql -u root -p -e "source script_completo.sql"
+  ```
+
+### Opção 2: arquivo por arquivo
+
+Rode os arquivos **na ordem**, do `01` ao `07`. No Workbench, abra e execute cada um. Na linha de comando, entre no cliente com `mysql -u root -p` e rode um `source` por linha:
+
+```sql
+source 01_ddl.sql
+source 02_inserts.sql
+source 03_dml.sql
+source 04_joins.sql
+source 05_procedure_trigger.sql
+source 06_view_function.sql
+source 07_usuarios_roles.sql
+```
+
+> Não junte vários `source` numa mesma linha: os arquivos que usam `DELIMITER` (05 e 06) fazem o cliente interpretar errado o restante da linha.
+
+Os arquivos `04_joins.sql` e `06_view_function.sql` terminam com `SELECT`s, então mostram resultados na tela. No Workbench, cada resultado aparece numa aba.
+
+### Testando depois de rodar
+
+Entre com um dos usuários da recepção (senha `Ana@Recepcao2026`):
+
+```bash
+mysql -u ana_recepcao -p
+```
+
+```sql
+USE clinica_medica;
+SELECT CURRENT_ROLE();                                   -- mostra a role recepcao ativa
+SELECT * FROM vw_agenda_consultas;                       -- agenda completa
+CALL agendar_consulta(1, 2, '2027-03-01 10:00:00');      -- agenda uma consulta
+CALL agendar_consulta(2, 2, '2027-03-01 10:00:00');      -- recusada: médico já ocupado nesse horário
+DELETE FROM Paciente WHERE idPaciente = 1;               -- negado: a recepção não apaga pacientes
+```
+
+---
+
 ## Documentação dos scripts
 
 ### `01_ddl.sql`: criação do banco e das tabelas
