@@ -117,3 +117,47 @@ O script foi executado duas vezes seguidas num MySQL 8.0, sem erro, e testado co
 - **Foram recusados, com a mensagem esperada:** paciente inexistente; médico inexistente; data no passado; parâmetro nulo; agendar um médico num horário já ocupado (pela procedure e por `INSERT` direto); remarcar para um horário em que o médico já atende.
 
 > **Observação:** com o log binário ativo (padrão do MySQL 8), só um usuário com privilégio `SUPER` (como o `root`) pode criar triggers e functions. Com outro usuário, é preciso antes rodar `SET GLOBAL log_bin_trust_function_creators = 1;` como root.
+
+### `07_usuarios_roles.sql`: role e usuários da recepção
+
+Cria a role `recepcao` e dois usuários ligados a ela. **Roda por último**, porque o MySQL não aceita conceder permissão (`GRANT`) sobre uma view, procedure ou function que ainda não existe.
+
+#### Por que usar uma role
+
+Uma role é um "pacote" de permissões com nome. Em vez de repetir os mesmos `GRANT`s para cada funcionário da recepção, as permissões são dadas uma vez à role, e a role é dada aos usuários. Se a recepção precisar de uma permissão nova, basta alterar a role, e todos os usuários ligados a ela recebem a mudança.
+
+#### Permissões da role `recepcao`
+
+A recepção cadastra pacientes, abre prontuários e agenda, remarca e cancela consultas. Ela recebe só o necessário para isso (**princípio do menor privilégio**):
+
+| Objeto | Permissões | Por quê |
+|---|---|---|
+| `Paciente` | `SELECT`, `INSERT`, `UPDATE` | Cadastrar pacientes e atualizar dados como o telefone. Sem `DELETE`: apagar um paciente apagaria o histórico dele. |
+| `Prontuario` | `SELECT`, `INSERT` | Abrir o prontuário no cadastro do paciente. Sem `UPDATE`: as observações clínicas são responsabilidade do médico. |
+| `Consulta` | `SELECT`, `INSERT`, `UPDATE`, `DELETE` | Agendar, remarcar e cancelar consultas. Os triggers continuam impedindo conflitos de horário. |
+| `Medico`, `Especialidade` | `SELECT` | Consultar médicos e especialidades para agendar, sem poder alterar o cadastro. |
+| `vw_agenda_consultas` | `SELECT` | Ver a agenda completa (paciente, idade, médico e especialidade) numa única consulta. |
+| `agendar_consulta` (procedure) | `EXECUTE` | Agendar pelo caminho com validações e mensagens claras. |
+| `calcular_idade` (function) | `EXECUTE` | Usar o cálculo de idade nas próprias consultas. |
+
+#### Usuários
+
+| Usuário | Senha (fictícia) |
+|---|---|
+| `ana_recepcao@localhost` | `Ana@Recepcao2026` |
+| `bruno_recepcao@localhost` | `Bruno@Recepcao2026` |
+
+- As senhas são **fictícias**, só para demonstração, porque este arquivo é público. As senhas têm maiúscula, minúscula, número e símbolo, para passar na política de senhas do MySQL caso ela esteja ativa.
+- `@localhost`: os usuários só conseguem se conectar a partir da própria máquina do servidor.
+- `GRANT 'recepcao' TO ...` liga a role aos dois usuários.
+- `SET DEFAULT ROLE 'recepcao' TO ...` é **obrigatório**: no MySQL, uma role concedida fica inativa até ser ativada. Sem esse comando, o usuário faria login sem nenhuma permissão e teria que rodar `SET ROLE` a cada conexão.
+- O script começa com `DROP USER IF EXISTS` e `DROP ROLE IF EXISTS` para poder ser rodado de novo sem erro.
+
+#### Regras verificadas
+
+O script foi executado depois dos arquivos 01 a 06 e repetido, sem erro. Logado como `ana_recepcao`, `CURRENT_ROLE()` mostrou a role `recepcao` já ativa, e:
+
+- **Funcionaram:** ler a view da agenda; usar `calcular_idade`; cadastrar um paciente e abrir o prontuário dele; atualizar o telefone; agendar pela procedure; cancelar a consulta; consultar médicos.
+- **Foram negados pelo MySQL (`command denied`):** apagar paciente; alterar prontuário; cadastrar médico; alterar especialidade; apagar a tabela `Consulta`; criar um usuário.
+
+O usuário `bruno_recepcao` também entrou com a role ativa.
