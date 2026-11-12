@@ -39,7 +39,7 @@ A ordem importa: cada arquivo usa o que os anteriores criaram. Por exemplo, os `
 |---|---|
 | Script do modelo (banco e tabelas) | `01_ddl.sql` |
 | Mínimo de 5 registros por tabela | `02_inserts.sql` |
-| Comandos DML com explicação | `03_dml.sql` |
+| Comandos DML com explicação | `03_dml.sql` (explicação na seção do arquivo, em *Documentação dos scripts*) |
 | Dois usuários ligados por uma ROLE | `07_usuarios_roles.sql` |
 | JOINs 1:1, 1:N e N:M | `04_joins.sql` |
 | Procedure | `agendar_consulta`, em `05_procedure_trigger.sql` |
@@ -158,6 +158,42 @@ O script foi executado duas vezes seguidas num MySQL 8.0, sem erro. Em seguida, 
 
 > **Observação:** no Windows, o MySQL guarda os nomes das tabelas em minúsculas, mas no Linux eles diferenciam maiúsculas de minúsculas. Por isso, os scripts devem usar os nomes exatamente como estão no DDL (`Paciente`, `Consulta`, `idconsulta`...).
 
+### `02_inserts.sql`: dados iniciais
+
+Popula as 5 tabelas com 5 registros cada (6 na `Consulta`), para que os scripts seguintes tenham o que consultar e alterar.
+
+| Comando | Por quê |
+|---|---|
+| `INSERT INTO ... VALUES` na ordem **Especialidade → Medico → Paciente → Prontuario → Consulta** | As FKs exigem que o registro "pai" exista antes do "filho". Um médico só pode ser cadastrado depois da especialidade, e uma consulta só depois do paciente e do médico. |
+| Ids informados explicitamente (`1, 2, 3...`) | Embora as colunas sejam `AUTO_INCREMENT`, os ids fixos deixam o `03_dml.sql` apontar para registros conhecidos (ex.: `idconsulta = 2`), e o resultado é o mesmo a cada execução do zero. |
+| `telefone` da paciente 5 como `NULL` | A coluna é opcional no DDL; o registro mostra que o banco aceita paciente sem telefone. |
+| Um prontuário por paciente | Respeita o `UNIQUE` em `Paciente_idPaciente` (relação 1:1). |
+| Nenhum médico com duas consultas no mesmo horário | Evita o erro do trigger `trg_consulta_conflito_insert`, criado no `05_procedure_trigger.sql`. |
+
+### `03_dml.sql`: UPDATE e DELETE
+
+| Operação | O que faz | Por quê |
+|---|---|---|
+| `UPDATE Paciente SET telefone ...` | Atualiza o telefone da paciente 1. | Exemplo de correção de dado cadastral. |
+| `UPDATE Consulta SET data_hora_consulta ...` | Remarca a consulta 2 para 20/11 às 09:30. | Passa pelo trigger `trg_consulta_conflito_update`, que confere se o médico está livre no novo horário. |
+| `UPDATE Prontuario SET observacao ...` | Altera a observação do prontuário do paciente 4. | Mostra o uso do `WHERE` por uma coluna que também identifica o registro (`Paciente_idPaciente`, que é único). |
+| `DELETE FROM Consulta WHERE idconsulta = 6` | Cancela a consulta 6. | Cancelamento é apagar a linha de `Consulta`. Nenhuma outra tabela depende dela, então a FK não impede. |
+
+- Todos os comandos usam `WHERE` com a chave primária (ou uma coluna `UNIQUE`). Sem o `WHERE`, `UPDATE` e `DELETE` atingem a tabela inteira.
+- Como as FKs usam `NO ACTION`, o banco recusaria apagar um paciente que tem consulta ou um médico que tem consulta. Por isso o único `DELETE` é numa consulta.
+- Depois do `03`, restam 5 consultas, e a consulta 2 aparece no novo horário.
+
+### `04_joins.sql`: um JOIN de cada tipo de relacionamento
+
+| Relacionamento | JOIN usado | Por quê |
+|---|---|---|
+| **1:1** Paciente + Prontuario | `INNER JOIN` por `Prontuario.Paciente_idPaciente = Paciente.idPaciente` | Mostra só pacientes que têm prontuário, cada um com o seu único prontuário. |
+| **1:N** Especialidade + Medico | `LEFT JOIN` por `Medico.Especialidade_idEspecialidade = Especialidade.idEspecialidade` | Lista todas as especialidades, inclusive as que ainda não têm médico, e repete a especialidade para cada médico dela. |
+| **N:M** Paciente + Consulta + Medico | Dois `INNER JOIN` a partir de `Consulta` | `Consulta` é a tabela associativa: cada linha liga um paciente a um médico. Os dois `JOIN` trazem os nomes dos dois lados. |
+
+- `INNER JOIN` devolve só as linhas que têm correspondência nos dois lados. `LEFT JOIN` devolve todas as da tabela da esquerda, com `NULL` onde não há correspondência.
+- Os apelidos (`p`, `pr`, `e`, `m`, `c`) deixam as consultas mais curtas.
+
 ### `05_procedure_trigger.sql`: procedure de agendamento e triggers de horário
 
 Cria as regras de negócio do agendamento de consultas. O arquivo pode ser rodado de novo sem erro, porque começa apagando os objetos se eles já existirem (`DROP ... IF EXISTS`).
@@ -204,6 +240,31 @@ O script foi executado duas vezes seguidas num MySQL 8.0, sem erro, e testado co
 - **Foram recusados, com a mensagem esperada:** paciente inexistente; médico inexistente; data no passado; parâmetro nulo; agendar um médico num horário já ocupado (pela procedure e por `INSERT` direto); remarcar para um horário em que o médico já atende.
 
 > **Observação:** com o log binário ativo (padrão do MySQL 8), só um usuário com privilégio `SUPER` (como o `root`) pode criar triggers e functions. Com outro usuário, é preciso antes rodar `SET GLOBAL log_bin_trust_function_creators = 1;` como root.
+
+### `06_view_function.sql`: function de idade e view da agenda
+
+O arquivo começa apagando a view e a function se existirem (`DROP ... IF EXISTS`), para poder ser rodado de novo sem erro.
+
+#### Function `calcular_idade(p_data_nascimento)`
+
+| Parte | Por quê |
+|---|---|
+| `TIMESTAMPDIFF(YEAR, p_data_nascimento, CURDATE())` | Calcula a idade em anos completos, descontando o ano corrente se o aniversário ainda não chegou. |
+| `RETURNS INT` | A idade é um número inteiro. |
+| `NOT DETERMINISTIC` | O resultado muda com o passar dos dias (depende de `CURDATE()`), então a function não é determinística. |
+| `NO SQL` | Ela não lê nem grava tabelas. Com o log binário ativo, o MySQL exige uma dessas declarações na function (`DETERMINISTIC`, `NO SQL` ou `READS SQL DATA`). |
+| `DELIMITER $$` | Mesmo motivo do `05`: o corpo da function tem `;` internos. |
+
+#### View `vw_agenda_consultas`
+
+| Parte | Por quê |
+|---|---|
+| `FROM Consulta` com `INNER JOIN` em Paciente, Medico e Especialidade | A agenda precisa da consulta, do paciente, do médico e da especialidade do médico. A especialidade é alcançada pelo médico (`Medico.Especialidade_idEspecialidade`). |
+| `calcular_idade(p.data_nascimento) AS idade_paciente` | Mostra a idade do paciente na agenda, usando a function acima (por isso ela é criada primeiro). |
+| `CREATE VIEW` | A view guarda a consulta, não os dados: sempre mostra o estado atual das tabelas, sem duplicar informação. |
+
+- Os dois `SELECT` no final testam a function e a view.
+- Com os dados do `02` e as alterações do `03`, a agenda mostra 5 consultas.
 
 ### `07_usuarios_roles.sql`: role e usuários da recepção
 
