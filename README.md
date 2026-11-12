@@ -175,7 +175,7 @@ Popula as 5 tabelas com 5 registros cada (6 na `Consulta`), para que os scripts 
 | Operação | O que faz | Por quê |
 |---|---|---|
 | `UPDATE Paciente SET telefone ...` | Atualiza o telefone da paciente 1. | Exemplo de correção de dado cadastral. |
-| `UPDATE Consulta SET data_hora_consulta ...` | Remarca a consulta 2 para 20/11 às 09:30. | Passa pelo trigger `trg_consulta_conflito_update`, que confere se o médico está livre no novo horário. |
+| `UPDATE Consulta SET data_hora_consulta ...` | Remarca a consulta 2 para 20/11 às 09:30. | Exemplo de remarcação. Não há outra consulta do médico 3 nesse horário. O trigger de remarcação (`trg_consulta_conflito_update`) só é criado depois, no `05`, e passa a valer para as remarcações seguintes. |
 | `UPDATE Prontuario SET observacao ...` | Altera a observação do prontuário do paciente 4. | Mostra o uso do `WHERE` por uma coluna que também identifica o registro (`Paciente_idPaciente`, que é único). |
 | `DELETE FROM Consulta WHERE idconsulta = 6` | Cancela a consulta 6. | Cancelamento é apagar a linha de `Consulta`. Nenhuma outra tabela depende dela, então a FK não impede. |
 
